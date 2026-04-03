@@ -3,6 +3,7 @@ package com.quanxiaoha.ai.robot.controller;
 import com.google.common.collect.Lists;
 import com.quanxiaoha.ai.robot.advisor.CustomerServiceAdvisor;
 import com.quanxiaoha.ai.robot.aspect.ApiOperationLog;
+import com.quanxiaoha.ai.robot.model.vo.chat.AIResponse;
 import com.quanxiaoha.ai.robot.model.vo.customerService.*;
 import com.quanxiaoha.ai.robot.service.CustomerService;
 import com.quanxiaoha.ai.robot.utils.PageResponse;
@@ -82,9 +83,11 @@ public class AiCustomerServiceController {
      * 流式对话
      * @return
      */
-    @GetMapping(value = "/chat/completion", produces = "text/html;charset=utf-8")
+    @PostMapping(value = "/completion", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @ApiOperationLog(description = "AI 智能客服对话")
-    public Flux<String> chat(@RequestParam(value = "message") String userMessage) {
+    public Flux<AIResponse> chat(@RequestBody @Validated AiCustomerServiceChatReqVO chatReqVO) {
+        String userMessage = chatReqVO.getMessage();
+
         // 构建 ChatModel
         ChatModel chatModel = OpenAiChatModel.builder()
                 .openAiApi(OpenAiApi.builder()
@@ -112,7 +115,8 @@ public class AiCustomerServiceController {
         // 流式输出
         return chatClientRequestSpec
                 .stream()
-                .content();
+                .content()
+                .mapNotNull(text -> AIResponse.builder().v(text).build()); // 构建返参 AIResponse
     }
 
 }

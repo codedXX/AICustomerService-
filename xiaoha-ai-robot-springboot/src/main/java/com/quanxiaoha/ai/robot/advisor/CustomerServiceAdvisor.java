@@ -68,23 +68,25 @@ public class CustomerServiceAdvisor implements StreamAdvisor {
         this.vectorStore = vectorStore;
     }
 
+
+    //这是核心方法，整个类最重要的地方
     @Override
     public Flux<ChatClientResponse> adviseStream(ChatClientRequest chatClientRequest, StreamAdvisorChain streamAdvisorChain) {
-        // 获取用户输入的提示词
+        // 第1步：拿到用户输入的问题
         Prompt prompt = chatClientRequest.prompt();
         UserMessage userMessage = prompt.getUserMessage();
 
-        // 查询向量库
-        // 检索与查询相似的文档
+
+        // 第2步：拿用户的问题去向量库做相似度搜索，返回最相关的 3 条知识文档
         List<Document> documents = vectorStore.similaritySearch(SearchRequest.builder()
                 .query(userMessage.getText()) // 查询的关键词
                 .topK(3) // 查询相似度最高的 3 条文档
                 .build());
 
-        // 构建向量查询结果上下文信息
+        // 第3步：把 3 条文档拼成一段字符串（context）
         String context = buildContext(documents);
 
-        // 填充提示词占位符，转换为 Prompt 提示词对象
+        // 第4步：把 context 和 question 填入模板，生成新的完整提示词
         Prompt newPrompt = DEFAULT_PROMPT_TEMPLATE.create(Map.of("question", userMessage.getText(),
                 "context", context), chatClientRequest.prompt().getOptions());
 
@@ -95,6 +97,7 @@ public class CustomerServiceAdvisor implements StreamAdvisor {
                 .prompt(newPrompt)
                 .build();
 
+        // 第5步：用新提示词替换原始请求，传给下一个环节（最终到达 AI）
         return streamAdvisorChain.nextStream(newChatClientRequest);
     }
 

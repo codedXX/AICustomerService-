@@ -125,6 +125,7 @@ public class ChatServiceImpl implements ChatService {
         List<ChatDO> chatDOS = chatDOPage.getRecords();
         // DO 转 VO
         List<FindChatHistoryPageListRspVO> vos = null;
+        //CollUtil.isNotEmpty是判断一个集合不为空
         if (CollUtil.isNotEmpty(chatDOS)) {
             vos = chatDOS.stream()
                     .map(chatDO -> FindChatHistoryPageListRspVO.builder() // 构建返参 VO
