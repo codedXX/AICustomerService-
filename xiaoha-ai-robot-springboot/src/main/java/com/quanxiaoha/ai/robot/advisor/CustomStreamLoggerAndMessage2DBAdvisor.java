@@ -47,6 +47,19 @@ public class CustomStreamLoggerAndMessage2DBAdvisor implements StreamAdvisor {
         return this.getClass().getSimpleName();
     }
 
+    /**
+     * 流式对话拦截方法（相当于流式调用的 AOP）
+     *
+     * 执行流程：
+     *   1. 调用 streamAdvisorChain.nextStream() 触发后续链路（最终请求 AI 模型），得到响应流 Flux
+     *   2. 通过 doOnNext    —— 每个流式 chunk 到达时，打印日志并拼接到 fullContent
+     *   3. 通过 doOnComplete —— 流全部结束后，将用户消息和 AI 完整回答一并写入数据库
+     *   4. 通过 doOnError   —— 出错时打印已收集的部分内容及异常信息
+     *
+     * @param chatClientRequest  封装了本次请求的消息、参数等上下文
+     * @param streamAdvisorChain Advisor 责任链，调用 nextStream() 将请求传递给下一个 Advisor 或最终的 AI 模型
+     * @return 处理后的响应流，每个元素为 AI 返回的一个 chunk 片段
+     */
     @Override
     public Flux<ChatClientResponse> adviseStream(ChatClientRequest chatClientRequest, StreamAdvisorChain streamAdvisorChain) {
         // 对话 UUID
@@ -54,16 +67,16 @@ public class CustomStreamLoggerAndMessage2DBAdvisor implements StreamAdvisor {
         // 用户消息
         String userMessage = aiChatReqVO.getMessage();
 
-        // 流式调用
+        // 调用责任链中的下一个处理器，最终触发 AI 模型，返回流式响应
         Flux<ChatClientResponse> chatClientResponseFlux = streamAdvisorChain.nextStream(chatClientRequest);
 
-        // 创建 AI 流式回答聚合容器（线程安全）
+        // 用于跨异步线程聚合所有 chunk 的容器（AtomicReference 保证线程安全）
         AtomicReference<StringBuilder> fullContent = new AtomicReference<>(new StringBuilder());
 
-        // 返回处理后的流
+        // 在原始响应流上挂载回调，实现日志打印和消息持久化，不改变流本身的数据
         return chatClientResponseFlux
                 .doOnNext(response -> {
-                    // 逐块收集内容
+                    // 每收到一个 chunk 片段：打印日志，并追加到 fullContent 用于后续拼接完整回答
                     String chunk = response.chatResponse().getResult().getOutput().getText();
 
                     log.info("## chunk: {}", chunk);
@@ -74,11 +87,11 @@ public class CustomStreamLoggerAndMessage2DBAdvisor implements StreamAdvisor {
                     }
                 })
                 .doOnComplete(() -> {
-                    // 流完成后打印完整回答
+                    // 流结束后，fullContent 中已聚合了 AI 的完整回答
                     String completeResponse = fullContent.get().toString();
                     log.info("\n==== FULL AI RESPONSE ====\n{}\n========================", completeResponse);
 
-                    // 开启编程式事务
+                    // 使用编程式事务，将用户消息和 AI 回答原子性地写入数据库，任一失败则全部回滚
                     transactionTemplate.execute(status -> {
                         try {
                             // 1. 存储用户消息
@@ -106,7 +119,7 @@ public class CustomStreamLoggerAndMessage2DBAdvisor implements StreamAdvisor {
                     });
                 })
                 .doOnError(error -> {
-                    // 出错时打印已收集的部分
+                    // 流出错时，打印已收集的部分内容，便于排查问题
                     String partialResponse = fullContent.get().toString();
                     log.error("## Stream 流出现错误，已收集回答如下: {}", partialResponse, error);
                 });
